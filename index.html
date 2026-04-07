@@ -3,37 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>繪畫描稿助手 Pro</title>
+    <title>繪畫瞄稿助手</title>
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        body { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; }
         
-        /* 1. 底層相機 */
+        /* 相機底層 */
         #video-bg {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
             object-fit: cover; z-index: 1;
         }
 
-        /* 2. 中層繪圖層 (透明畫布) */
+        /* 圖片疊加層 */
         #canvas-overlay {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            z-index: 2; pointer-events: none; /* 讓點擊穿透到下面的控制項 */
+            z-index: 2; touch-action: none; /* 禁用瀏覽器預設手勢，確保拖動順暢 */
         }
 
-        /* 3. 上層控制欄 */
+        /* 控制面板 */
         .controls {
             position: fixed; bottom: 0; left: 0; width: 100%;
-            background: rgba(0, 0, 0, 0.7); color: white;
+            background: rgba(0, 0, 0, 0.8); color: white;
             z-index: 10; padding: 15px; box-sizing: border-box;
-            max-height: 40vh; overflow-y: auto;
+            border-top-left-radius: 15px; border-top-right-radius: 15px;
         }
 
-        .btn-group { display: flex; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }
-        button { flex: 1; padding: 10px; border: none; border-radius: 5px; background: #444; color: white; min-width: 80px; }
-        button.active { background: #007bff; }
+        .btn-group { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        button { 
+            flex: 1; padding: 12px 5px; border: none; border-radius: 8px; 
+            background: #444; color: white; font-size: 14px; font-weight: bold;
+        }
+        button:active { background: #666; }
+        #startCam { background: #007bff; }
+        #lockBtn.locked { background: #dc3545; }
+
+        .slider-row { margin: 12px 0; display: flex; align-items: center; gap: 15px; }
+        .slider-row span { min-width: 50px; font-size: 14px; }
+        input[type="range"] { flex: 1; height: 25px; }
         
-        .slider-row { margin: 10px 0; display: flex; align-items: center; gap: 10px; }
-        input[type="range"] { flex: 1; }
-        input[type="file"] { margin-bottom: 10px; width: 100%; }
+        input[type="file"] { 
+            display: block; margin-bottom: 15px; width: 100%; color: #ccc; font-size: 14px;
+        }
+        
+        .hint { font-size: 12px; color: #aaa; text-align: center; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -46,10 +57,10 @@
         <input type="file" id="imageUpload" accept="image/*">
         
         <div class="btn-group">
-            <button id="startCam">開啟相機</button>
-            <button id="rotateLeft">左轉 90°</button>
-            <button id="rotateRight">右轉 90°</button>
-            <button id="resetAll">重置全部</button>
+            <button id="startCam">1. 開啟相機</button>
+            <button id="rotateRight">旋轉 90°</button>
+            <button id="lockBtn">拖動：允許</button>
+            <button id="resetAll">重置</button>
         </div>
 
         <div class="slider-row">
@@ -58,9 +69,9 @@
         </div>
         <div class="slider-row">
             <span>大小</span>
-            <input type="range" id="scaleSlider" min="10" max="300" value="100">
+            <input type="range" id="scaleSlider" min="10" max="500" value="100">
         </div>
-        <p style="font-size: 12px; color: #aaa;">提示：輸入座標或直接在螢幕上拖動（開發中）</p>
+        <div class="hint">💡 提示：手指直接在螢幕上拖動圖片即可對齊</div>
     </div>
 
     <script>
@@ -72,9 +83,14 @@
         let rotation = 0;
         let scale = 1;
         let opacity = 0.5;
-        let posX = 0, posY = 0;
+        let posX = 0, posY = 0; // 圖片偏移量
+        
+        let isDragging = false;
+        let canDrag = true; // 是否允許拖動
+        let lastTouchX = 0;
+        let lastTouchY = 0;
 
-        // 初始化畫布大小
+        // 初始化畫布
         function resizeCanvas() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
@@ -83,40 +99,75 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
-        // 1. 開啟相機
-        document.getElementById('startCam').addEventListener('click', async () => {
+        // --- 1. 相機功能 ---
+        document.getElementById('startCam').onclick = async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "environment" }, 
                     audio: false 
                 });
                 video.srcObject = stream;
-                document.getElementById('startCam').style.background = "#28a745";
                 document.getElementById('startCam').innerText = "相機已啟動";
+                document.getElementById('startCam').style.background = "#28a745";
             } catch (err) {
-                alert("無法開啟相機，請檢查 HTTPS 或權限設定");
+                alert("無法開啟相機，請檢查 HTTPS 設定或權限。");
             }
-        });
+        };
 
-        // 2. 圖片上傳
-        document.getElementById('imageUpload').addEventListener('change', (e) => {
+        // --- 2. 圖片載入 ---
+        document.getElementById('imageUpload').onchange = (e) => {
             const file = e.target.files[0];
             const reader = new FileReader();
             reader.onload = (event) => {
                 img.src = event.target.result;
                 img.onload = () => {
-                    // 圖片載入後置中
-                    posX = 0;
-                    posY = 0;
+                    posX = 0; posY = 0; // 換圖時重置位置
                     draw();
                 };
             };
             reader.readAsDataURL(file);
+        };
+
+        // --- 3. 觸控拖動邏輯 ---
+        canvas.addEventListener('touchstart', (e) => {
+            if (!canDrag) return;
+            isDragging = true;
+            lastTouchX = e.touches[0].clientX;
+            lastTouchY = e.touches[0].clientY;
         });
 
-        // 3. 控制邏輯
-        document.getElementById('rotateLeft').onclick = () => { rotation -= 90; draw(); };
+        canvas.addEventListener('touchmove', (e) => {
+            if (!isDragging || !canDrag) return;
+            
+            const touchX = e.touches[0].clientX;
+            const touchY = e.touches[0].clientY;
+            
+            // 計算移動距離
+            const deltaX = touchX - lastTouchX;
+            const deltaY = touchY - lastTouchY;
+            
+            posX += deltaX;
+            posY += deltaY;
+            
+            lastTouchX = touchX;
+            lastTouchY = touchY;
+            
+            draw();
+        });
+
+        canvas.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+
+        // --- 4. 控制項按鈕 ---
         document.getElementById('rotateRight').onclick = () => { rotation += 90; draw(); };
+        
+        document.getElementById('lockBtn').onclick = function() {
+            canDrag = !canDrag;
+            this.innerText = canDrag ? "拖動：允許" : "拖動：鎖定";
+            this.classList.toggle('locked', !canDrag);
+        };
+
         document.getElementById('resetAll').onclick = () => {
             rotation = 0; scale = 1; opacity = 0.5; posX = 0; posY = 0;
             document.getElementById('opacitySlider').value = 50;
@@ -134,19 +185,19 @@
             draw();
         };
 
-        // 4. 繪製函數
+        // --- 5. 核心繪製函數 ---
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             if (!img.src) return;
 
             ctx.save();
-            // 移動畫筆到螢幕中心
+            // 以螢幕中心為基準，再加上移動的位移量 (posX, posY)
             ctx.translate(canvas.width / 2 + posX, canvas.height / 2 + posY);
             ctx.rotate(rotation * Math.PI / 180);
             ctx.scale(scale, scale);
             ctx.globalAlpha = opacity;
             
-            // 繪製圖片（讓圖片中心對準畫筆位置）
+            // 繪製圖片
             ctx.drawImage(img, -img.width / 2, -img.height / 2);
             ctx.restore();
         }
