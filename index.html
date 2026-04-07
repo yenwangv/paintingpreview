@@ -1,52 +1,444 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-Hant-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painting Preview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>手機實時描圖助手</title>
     <style>
-        /* Add your styles here */
-        body, html {
-            height: 100%;
+        body {
             margin: 0;
+            padding: 0;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: black;
+            font-family: Arial, sans-serif;
         }
-        #cameraView {
+
+        #camera-view {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+            display: block;
+        }
+
+        #overlay-container {
             position: absolute;
             top: 0;
             left: 0;
-            right: 0;
-            bottom: 0;
-            z-index: -1;
             width: 100%;
             height: 100%;
+            z-index: 2;
+            display: none;
+            touch-action: none;
         }
-        #controlBar {
+
+        #overlay-image {
             position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 400px;
+            height: 300px;
+            object-fit: contain;
+            opacity: 0.5;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+            transform-origin: center;
+        }
+
+        #overlay-image:active {
+            cursor: grabbing;
+        }
+
+        #control-bar {
+            position: fixed;
             bottom: 0;
             width: 100%;
-            z-index: 1;
-            background: rgba(255, 255, 255, 0.8);
-            transition: opacity 0.5s;
+            padding: 20px;
+            background-color: rgba(0, 0, 0, 0.8);
+            z-index: 10;
+            box-sizing: border-box;
+            color: white;
+            text-align: center;
+            max-height: 40vh;
+            overflow-y: auto;
         }
-        .collapsible {
-            display: none;
+
+        .collapsible-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background-color: rgba(0, 122, 255, 0.2);
+            border: 1px solid #007bff;
+            border-radius: 5px;
+            cursor: pointer;
+            user-select: none;
+            margin-bottom: 10px;
+        }
+
+        .collapsible-header:hover {
+            background-color: rgba(0, 122, 255, 0.3);
+        }
+
+        .collapsible-header .toggle-icon {
+            font-size: 18px;
+            transition: transform 0.3s ease;
+        }
+
+        .collapsible-header.collapsed .toggle-icon {
+            transform: rotate(-90deg);
+        }
+
+        .collapsible-content {
+            max-height: 500px;
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+            opacity: 1;
+        }
+
+        .collapsible-content.collapsed {
+            max-height: 0;
+            opacity: 0;
+        }
+
+        input[type="range"] {
+            width: 80%;
+            margin-top: 10px;
+        }
+
+        input[type="file"] {
+            margin-top: 10px;
+        }
+
+        label {
+            display: block;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        button:active {
+            opacity: 0.8;
+        }
+
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        #status-message {
+            font-size: 12px;
+            margin-top: 10px;
+            min-height: 20px;
+            color: #90ee90;
+        }
+
+        .control-group {
+            margin-top: 10px;
+            border-top: 1px solid #555;
+            padding-top: 10px;
+        }
+
+        .control-row {
+            display: flex;
+            justify-content: center;
+            gap: 5px;
+            flex-wrap: wrap;
         }
     </style>
 </head>
 <body>
-    <div id="cameraView"></div>
-    <div id="controlBar">
-        <!-- Control Bar Content -->
+
+    <video id="camera-view" autoplay playsinline muted></video>
+
+    <div id="overlay-container">
+        <img id="overlay-image" alt="草稿圖片">
     </div>
+
+    <div id="control-bar">
+        <button id="start-camera">打開相機</button>
+        <button id="stop-camera" style="display: none; background-color: #dc3545;">關閉相機</button>
+        
+        <!-- 基本設定 - 可收合 -->
+        <div class="collapsible-section">
+            <div class="collapsible-header">
+                <span>📋 基本設定</span>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="collapsible-content">
+                <label for="image-upload">請選擇要描的圖片：</label>
+                <input type="file" id="image-upload" accept="image/*">
+                
+                <br>
+                <label for="opacity-slider">調整草稿透明度 (50%):</label>
+                <input type="range" id="opacity-slider" min="0" max="1" step="0.01" value="0.5">
+            </div>
+        </div>
+
+        <!-- 圖片調整 - 可收合 -->
+        <div class="collapsible-section">
+            <div class="collapsible-header">
+                <span>🔧 圖片調整</span>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="collapsible-content">
+                <div class="control-group">
+                    <label>調整圖片大小：</label>
+                    <input type="range" id="scale-slider" min="0.5" max="3" step="0.1" value="1">
+                    <span id="scale-display" style="font-size: 12px;">100%</span>
+                </div>
+
+                <div class="control-group">
+                    <label>旋轉圖片：</label>
+                    <div class="control-row">
+                        <button id="rotate-left">⟲ 左轉</button>
+                        <button id="rotate-right">⟳ 右轉</button>
+                        <button id="reset-transform">重置</button>
+                    </div>
+                    <span id="rotation-display" style="font-size: 12px;">旋轉角度: 0°</span>
+                </div>
+            </div>
+        </div>
+        
+        <div id="status-message"></div>
+    </div>
+
     <script>
-        // JavaScript for collapsible sections
-        document.addEventListener('DOMContentLoaded', () => {
-            const collapsibles = document.querySelectorAll('.collapsible');
-            collapsibles.forEach(section => {
-                section.style.display = 'none'; // Make all sections collapsible by default
+        const video = document.getElementById('camera-view');
+        const overlay = document.getElementById('overlay-image');
+        const container = document.getElementById('overlay-container');
+        const startBtn = document.getElementById('start-camera');
+        const stopBtn = document.getElementById('stop-camera');
+        const uploadBtn = document.getElementById('image-upload');
+        const opacitySlider = document.getElementById('opacity-slider');
+        const scaleSlider = document.getElementById('scale-slider');
+        const scaleDisplay = document.getElementById('scale-display');
+        const rotateLeftBtn = document.getElementById('rotate-left');
+        const rotateRightBtn = document.getElementById('rotate-right');
+        const resetBtn = document.getElementById('reset-transform');
+        const rotationDisplay = document.getElementById('rotation-display');
+        const opacityText = document.querySelector('label[for="opacity-slider"]');
+        const statusMsg = document.getElementById('status-message');
+        
+        let currentStream = null;
+        let rotation = 0;
+        let scale = 1;
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        // Utility function for status messages
+        const showStatus = (message, type = 'info') => {
+            statusMsg.textContent = message;
+            statusMsg.style.color = type === 'error' ? '#ff6b6b' : '#90ee90';
+            setTimeout(() => {
+                statusMsg.textContent = '';
+            }, 3000);
+        };
+
+        // Collapsible sections functionality
+        const setupCollapsibleSections = () => {
+            const headers = document.querySelectorAll('.collapsible-header');
+            headers.forEach(header => {
+                header.addEventListener('click', () => {
+                    const content = header.nextElementSibling;
+                    header.classList.toggle('collapsed');
+                    content.classList.toggle('collapsed');
+                });
             });
+        };
+
+        // Update image transform
+        const updateTransform = () => {
+            overlay.style.transform = `translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px)) rotate(${rotation}deg) scale(${scale})`;
+        };
+
+        // Rotate left
+        rotateLeftBtn.addEventListener('click', () => {
+            rotation = (rotation - 15 + 360) % 360;
+            updateTransform();
+            rotationDisplay.textContent = `旋轉角度: ${rotation}°`;
         });
+
+        // Rotate right
+        rotateRightBtn.addEventListener('click', () => {
+            rotation = (rotation + 15) % 360;
+            updateTransform();
+            rotationDisplay.textContent = `旋轉角度: ${rotation}°`;
+        });
+
+        // Reset transform
+        resetBtn.addEventListener('click', () => {
+            rotation = 0;
+            scale = 1;
+            offsetX = 0;
+            offsetY = 0;
+            scaleSlider.value = 1;
+            scaleDisplay.textContent = '100%';
+            rotationDisplay.textContent = '旋轉角度: 0°';
+            updateTransform();
+            showStatus('已重置圖片變換');
+        });
+
+        // Scale slider
+        scaleSlider.addEventListener('input', () => {
+            scale = parseFloat(scaleSlider.value);
+            scaleDisplay.textContent = Math.round(scale * 100) + '%';
+            updateTransform();
+        });
+
+        // Drag to move
+        overlay.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            dragStartX = e.clientX - offsetX;
+            dragStartY = e.clientY - offsetY;
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                offsetX = e.clientX - dragStartX;
+                offsetY = e.clientY - dragStartY;
+                updateTransform();
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        // Touch support for mobile
+        overlay.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            dragStartX = e.touches[0].clientX - offsetX;
+            dragStartY = e.touches[0].clientY - offsetY;
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            if (isDragging) {
+                offsetX = e.touches[0].clientX - dragStartX;
+                offsetY = e.touches[0].clientY - dragStartY;
+                updateTransform();
+            }
+        });
+
+        document.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+
+        // --- Bug Fix 1: Handle camera stream properly ---
+        startBtn.addEventListener('click', async () => {
+            try {
+                // Check if browser supports getUserMedia
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error('Your browser does not support camera access.');
+                }
+
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: "environment",
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }, 
+                    audio: false 
+                });
+                
+                currentStream = stream;
+                video.srcObject = stream;
+                
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-block';
+                showStatus('相機已開啟');
+            } catch (error) {
+                console.error("Camera access error:", error);
+                const errorMsg = error.name === 'NotAllowedError' 
+                    ? '相機權限被拒絕。請在設置中允許相機訪問。'
+                    : error.name === 'NotFoundError'
+                    ? '找不到相機設備。'
+                    : '打開相機失敗。請確認是否已授予相機權限，且必須在 HTTPS 協議下運行。';
+                showStatus(errorMsg, 'error');
+            }
+        });
+
+        // --- Bug Fix 2: Stop camera stream properly ---
+        stopBtn.addEventListener('click', () => {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+                currentStream = null;
+            }
+            video.srcObject = null;
+            startBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            showStatus('相機已關閉');
+        });
+
+        // --- Bug Fix 3: Validate file size and format ---
+        uploadBtn.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            
+            if (!file) return;
+
+            // Check file size (max 10MB)
+            const maxSize = 10 * 1024 * 1024;
+            if (file.size > maxSize) {
+                showStatus('圖片大小超過 10MB。請選擇較小的圖片。', 'error');
+                uploadBtn.value = '';
+                return;
+            }
+
+            // Validate image type
+            if (!file.type.startsWith('image/')) {
+                showStatus('請選擇有效的圖片文件。', 'error');
+                uploadBtn.value = '';
+                return;
+            }
+
+            const reader = new FileReader();
+            
+            reader.onload = (e) => {
+                overlay.src = e.target.result;
+                container.style.display = 'block';
+                showStatus('圖片已加載');
+            };
+
+            reader.onerror = () => {
+                showStatus('讀取圖片失敗。', 'error');
+                uploadBtn.value = '';
+            };
+            
+            reader.readAsDataURL(file);
+        });
+
+        // --- Bug Fix 4: Update opacity label dynamically ---
+        opacitySlider.addEventListener('input', () => {
+            const opacityValue = opacitySlider.value;
+            overlay.style.opacity = opacityValue;
+            opacityText.textContent = `調整草稿透明度 (${Math.round(opacityValue * 100)}%):`;
+        });
+
+        // --- Bug Fix 5: Cleanup on page unload ---
+        window.addEventListener('beforeunload', () => {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+        });
+
+        // Initialize collapsible sections
+        setupCollapsibleSections();
     </script>
 </body>
 </html>
