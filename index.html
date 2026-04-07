@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>手機實時描圖助手</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: black;
+            font-family: Arial, sans-serif;
+        }
+
+        #camera-view {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+            display: block;
+        }
+
+        #overlay-image {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            opacity: 0.5;
+            z-index: 2;
+            display: none;
+        }
+
+        #control-bar {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            padding: 20px;
+            background-color: rgba(0, 0, 0, 0.8);
+            z-index: 10;
+            box-sizing: border-box;
+            color: white;
+            text-align: center;
+            max-height: 30vh;
+            overflow-y: auto;
+        }
+
+        input[type="range"] {
+            width: 80%;
+            margin-top: 10px;
+        }
+
+        input[type="file"] {
+            margin-top: 10px;
+        }
+
+        label {
+            display: block;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        button:active {
+            opacity: 0.8;
+        }
+
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        #status-message {
+            font-size: 12px;
+            margin-top: 10px;
+            min-height: 20px;
+            color: #90ee90;
+        }
+    </style>
+</head>
+<body>
+
+    <video id="camera-view" autoplay playsinline muted></video>
+
+    <img id="overlay-image" alt="草稿圖片">
+
+    <div id="control-bar">
+        <button id="start-camera">打開相機</button>
+        <button id="stop-camera" style="display: none; background-color: #dc3545;">關閉相機</button>
+        
+        <br>
+        <label for="image-upload">請選擇要描的圖片：</label>
+        <input type="file" id="image-upload" accept="image/*">
+        
+        <br>
+        <label for="opacity-slider">調整草稿透明度 (50%):</label>
+        <input type="range" id="opacity-slider" min="0" max="1" step="0.01" value="0.5">
+        
+        <div id="status-message"></div>
+    </div>
+
+    <script>
+        const video = document.getElementById('camera-view');
+        const overlay = document.getElementById('overlay-image');
+        const startBtn = document.getElementById('start-camera');
+        const stopBtn = document.getElementById('stop-camera');
+        const uploadBtn = document.getElementById('image-upload');
+        const slider = document.getElementById('opacity-slider');
+        const opacityText = document.querySelector('label[for="opacity-slider"]');
+        const statusMsg = document.getElementById('status-message');
+        
+        let currentStream = null;
+
+        // Utility function for status messages
+        const showStatus = (message, type = 'info') => {
+            statusMsg.textContent = message;
+            statusMsg.style.color = type === 'error' ? '#ff6b6b' : '#90ee90';
+            setTimeout(() => {
+                statusMsg.textContent = '';
+            }, 3000);
+        };
+
+        // --- Bug Fix 1: Handle camera stream properly ---
+        startBtn.addEventListener('click', async () => {
+            try {
+                // Check if browser supports getUserMedia
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error('Your browser does not support camera access.');
+                }
+
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: "environment",
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }, 
+                    audio: false 
+                });
+                
+                currentStream = stream;
+                video.srcObject = stream;
+                
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-block';
+                showStatus('相機已開啟');
+            } catch (error) {
+                console.error("Camera access error:", error);
+                const errorMsg = error.name === 'NotAllowedError' 
+                    ? '相機權限被拒絕。請在設置中允許相機訪問。'
+                    : error.name === 'NotFoundError'
+                    ? '找不到相機設備。'
+                    : '打開相機失敗。請確認是否已授予相機權限，且必須在 HTTPS 協議下運行。';
+                showStatus(errorMsg, 'error');
+            }
+        });
+
+        // --- Bug Fix 2: Stop camera stream properly ---
+        stopBtn.addEventListener('click', () => {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+                currentStream = null;
+            }
+            video.srcObject = null;
+            startBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            showStatus('相機已關閉');
+        });
+
+        // --- Bug Fix 3: Validate file size and format ---
+        uploadBtn.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            
+            if (!file) return;
+
+            // Check file size (max 10MB)
+            const maxSize = 10 * 1024 * 1024;
+            if (file.size > maxSize) {
+                showStatus('圖片大小超過 10MB。請選擇較小的圖片。', 'error');
+                uploadBtn.value = '';
+                return;
+            }
+
+            // Validate image type
+            if (!file.type.startsWith('image/')) {
+                showStatus('請選擇有效的圖片文件。', 'error');
+                uploadBtn.value = '';
+                return;
+            }
+
+            const reader = new FileReader();
+            
+            reader.onload = (e) => {
+                overlay.src = e.target.result;
+                overlay.style.display = 'block';
+                showStatus('圖片已加載');
+            };
+
+            reader.onerror = () => {
+                showStatus('讀取圖片失敗。', 'error');
+                uploadBtn.value = '';
+            };
+            
+            reader.readAsDataURL(file);
+        });
+
+        // --- Bug Fix 4: Update opacity label dynamically ---
+        slider.addEventListener('input', () => {
+            const opacityValue = slider.value;
+            overlay.style.opacity = opacityValue;
+            opacityText.textContent = `調整草稿透明度 (${Math.round(opacityValue * 100)}%):`;
+        });
+
+        // --- Bug Fix 5: Cleanup on page unload ---
+        window.addEventListener('beforeunload', () => {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>
