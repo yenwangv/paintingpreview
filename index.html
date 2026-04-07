@@ -3,204 +3,178 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>繪畫瞄稿助手</title>
+    <title>繪畫瞄稿 Pro+</title>
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; }
+        body { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         
-        /* 相機底層 */
+        /* 1. 底層相機 */
         #video-bg {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
             object-fit: cover; z-index: 1;
         }
 
-        /* 圖片疊加層 */
+        /* 2. 中層圖片畫布 (處理所有手勢) */
         #canvas-overlay {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            z-index: 2; touch-action: none; /* 禁用瀏覽器預設手勢，確保拖動順暢 */
+            z-index: 5; touch-action: none;
         }
 
-        /* 控制面板 */
-        .controls {
+        /* 3. 上層控制面板 */
+        #control-panel {
             position: fixed; bottom: 0; left: 0; width: 100%;
-            background: rgba(0, 0, 0, 0.8); color: white;
-            z-index: 10; padding: 15px; box-sizing: border-box;
+            background: rgba(0, 0, 0, 0.85); color: white;
+            z-index: 100; /* 確保在最上層，檔案上傳才會有反應 */
+            transition: transform 0.3s ease;
             border-top-left-radius: 15px; border-top-right-radius: 15px;
         }
 
-        .btn-group { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-        button { 
-            flex: 1; padding: 12px 5px; border: none; border-radius: 8px; 
-            background: #444; color: white; font-size: 14px; font-weight: bold;
-        }
-        button:active { background: #666; }
-        #startCam { background: #007bff; }
-        #lockBtn.locked { background: #dc3545; }
+        /* 摺疊狀態 */
+        #control-panel.collapsed { transform: translateY(calc(100% - 40px)); }
 
-        .slider-row { margin: 12px 0; display: flex; align-items: center; gap: 15px; }
-        .slider-row span { min-width: 50px; font-size: 14px; }
-        input[type="range"] { flex: 1; height: 25px; }
-        
-        input[type="file"] { 
-            display: block; margin-bottom: 15px; width: 100%; color: #ccc; font-size: 14px;
+        #toggle-bar {
+            height: 40px; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; background: rgba(255, 255, 255, 0.1); border-top-left-radius: 15px; border-top-right-radius: 15px;
         }
+
+        .panel-content { padding: 15px; }
+
+        .btn-group { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; }
+        button { flex: 1; padding: 12px 5px; border: none; border-radius: 8px; background: #444; color: white; font-weight: bold; }
+        #startCam { background: #007bff; }
         
-        .hint { font-size: 12px; color: #aaa; text-align: center; margin-top: 5px; }
+        .slider-row { margin: 15px 0; display: flex; align-items: center; gap: 15px; }
+        .slider-row span { min-width: 50px; }
+        input[type="range"] { flex: 1; height: 30px; }
+        input[type="file"] { margin-bottom: 15px; width: 100%; }
+        
+        .hint { font-size: 12px; color: #aaa; text-align: center; }
     </style>
 </head>
 <body>
 
     <video id="video-bg" autoplay playsinline muted></video>
-    
     <canvas id="canvas-overlay"></canvas>
 
-    <div class="controls">
-        <input type="file" id="imageUpload" accept="image/*">
-        
-        <div class="btn-group">
-            <button id="startCam">1. 開啟相機</button>
-            <button id="rotateRight">旋轉 90°</button>
-            <button id="lockBtn">拖動：允許</button>
-            <button id="resetAll">重置</button>
-        </div>
+    <div id="control-panel">
+        <div id="toggle-bar"><span>🔼 點擊展開/收合控制選單 🔽</span></div>
+        <div class="panel-content">
+            <input type="file" id="imageUpload" accept="image/*">
+            
+            <div class="btn-group">
+                <button id="startCam">開啟相機</button>
+                <button id="resetBtn">位置重置</button>
+            </div>
 
-        <div class="slider-row">
-            <span>透明度</span>
-            <input type="range" id="opacitySlider" min="0" max="100" value="50">
+            <div class="slider-row">
+                <span>透明度</span>
+                <input type="range" id="opacitySlider" min="0" max="100" value="50">
+            </div>
+            
+            <div class="hint">
+                💡 單指：移動圖片<br>
+                💡 兩指：縮放與旋轉圖片
+            </div>
         </div>
-        <div class="slider-row">
-            <span>大小</span>
-            <input type="range" id="scaleSlider" min="10" max="500" value="100">
-        </div>
-        <div class="hint">💡 提示：手指直接在螢幕上拖動圖片即可對齊</div>
     </div>
 
     <script>
         const video = document.getElementById('video-bg');
         const canvas = document.getElementById('canvas-overlay');
         const ctx = canvas.getContext('2d');
+        const panel = document.getElementById('control-panel');
         
         let img = new Image();
-        let rotation = 0;
-        let scale = 1;
-        let opacity = 0.5;
-        let posX = 0, posY = 0; // 圖片偏移量
-        
-        let isDragging = false;
-        let canDrag = true; // 是否允許拖動
-        let lastTouchX = 0;
-        let lastTouchY = 0;
+        let posX = 0, posY = 0, scale = 1, rotation = 0, opacity = 0.5;
 
-        // 初始化畫布
-        function resizeCanvas() {
+        // 手勢追蹤變數
+        let lastTouchDist = 0;
+        let lastTouchAngle = 0;
+        let isDragging = false;
+        let lastX = 0, lastY = 0;
+
+        // --- 1. 初始化與選單摺疊 ---
+        window.addEventListener('resize', () => {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
             draw();
-        }
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
+        });
+        window.dispatchEvent(new Event('resize'));
 
-        // --- 1. 相機功能 ---
+        document.getElementById('toggle-bar').onclick = () => panel.classList.toggle('collapsed');
+
+        // --- 2. 相機與檔案 ---
         document.getElementById('startCam').onclick = async () => {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment" }, 
-                    audio: false 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
                 video.srcObject = stream;
-                document.getElementById('startCam').innerText = "相機已啟動";
-                document.getElementById('startCam').style.background = "#28a745";
-            } catch (err) {
-                alert("無法開啟相機，請檢查 HTTPS 設定或權限。");
-            }
+            } catch (err) { alert("開啟相機失敗，請檢查 HTTPS 或權限。"); }
         };
 
-        // --- 2. 圖片載入 ---
         document.getElementById('imageUpload').onchange = (e) => {
-            const file = e.target.files[0];
             const reader = new FileReader();
-            reader.onload = (event) => {
-                img.src = event.target.result;
-                img.onload = () => {
-                    posX = 0; posY = 0; // 換圖時重置位置
-                    draw();
-                };
+            reader.onload = (ev) => {
+                img.src = ev.target.result;
+                img.onload = () => { posX = 0; posY = 0; scale = 1; rotation = 0; draw(); };
             };
-            reader.readAsDataURL(file);
+            reader.readAsDataURL(e.target.files[0]);
         };
 
-        // --- 3. 觸控拖動邏輯 ---
+        // --- 3. 手勢核心邏輯 (單指拖動 & 雙指縮放旋轉) ---
         canvas.addEventListener('touchstart', (e) => {
-            if (!canDrag) return;
-            isDragging = true;
-            lastTouchX = e.touches[0].clientX;
-            lastTouchY = e.touches[0].clientY;
+            if (e.touches.length === 1) {
+                isDragging = true;
+                lastX = e.touches[0].clientX;
+                lastY = e.touches[0].clientY;
+            } else if (e.touches.length === 2) {
+                isDragging = false;
+                // 計算初始兩指距離與角度
+                lastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                lastTouchAngle = Math.atan2(e.touches[1].clientY - e.touches[0].clientY, e.touches[1].clientX - e.touches[0].clientX);
+            }
         });
 
         canvas.addEventListener('touchmove', (e) => {
-            if (!isDragging || !canDrag) return;
+            e.preventDefault(); // 防止網頁捲動
             
-            const touchX = e.touches[0].clientX;
-            const touchY = e.touches[0].clientY;
-            
-            // 計算移動距離
-            const deltaX = touchX - lastTouchX;
-            const deltaY = touchY - lastTouchY;
-            
-            posX += deltaX;
-            posY += deltaY;
-            
-            lastTouchX = touchX;
-            lastTouchY = touchY;
-            
+            if (e.touches.length === 1 && isDragging) {
+                // 單指移動
+                posX += e.touches[0].clientX - lastX;
+                posY += e.touches[0].clientY - lastY;
+                lastX = e.touches[0].clientX;
+                lastY = e.touches[0].clientY;
+            } else if (e.touches.length === 2) {
+                // 雙指縮放與旋轉
+                const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                const angle = Math.atan2(e.touches[1].clientY - e.touches[0].clientY, e.touches[1].clientX - e.touches[0].clientX);
+                
+                // 縮放更新
+                if (lastTouchDist > 0) {
+                    scale *= (dist / lastTouchDist);
+                }
+                
+                // 旋轉更新
+                const deltaAngle = angle - lastTouchAngle;
+                rotation += deltaAngle * (180 / Math.PI);
+
+                lastTouchDist = dist;
+                lastTouchAngle = angle;
+            }
             draw();
-        });
+        }, { passive: false });
 
         canvas.addEventListener('touchend', () => {
             isDragging = false;
+            lastTouchDist = 0;
         });
 
-        // --- 4. 控制項按鈕 ---
-        document.getElementById('rotateRight').onclick = () => { rotation += 90; draw(); };
-        
-        document.getElementById('lockBtn').onclick = function() {
-            canDrag = !canDrag;
-            this.innerText = canDrag ? "拖動：允許" : "拖動：鎖定";
-            this.classList.toggle('locked', !canDrag);
-        };
+        // --- 4. 其它控制 ---
+        document.getElementById('opacitySlider').oninput = (e) => { opacity = e.target.value / 100; draw(); };
+        document.getElementById('resetBtn').onclick = () => { posX = 0; posY = 0; scale = 1; rotation = 0; draw(); };
 
-        document.getElementById('resetAll').onclick = () => {
-            rotation = 0; scale = 1; opacity = 0.5; posX = 0; posY = 0;
-            document.getElementById('opacitySlider').value = 50;
-            document.getElementById('scaleSlider').value = 100;
-            draw();
-        };
-
-        document.getElementById('opacitySlider').oninput = (e) => {
-            opacity = e.target.value / 100;
-            draw();
-        };
-
-        document.getElementById('scaleSlider').oninput = (e) => {
-            scale = e.target.value / 100;
-            draw();
-        };
-
-        // --- 5. 核心繪製函數 ---
+        // --- 5. 繪製 ---
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             if (!img.src) return;
-
             ctx.save();
-            // 以螢幕中心為基準，再加上移動的位移量 (posX, posY)
             ctx.translate(canvas.width / 2 + posX, canvas.height / 2 + posY);
-            ctx.rotate(rotation * Math.PI / 180);
-            ctx.scale(scale, scale);
-            ctx.globalAlpha = opacity;
-            
-            // 繪製圖片
-            ctx.drawImage(img, -img.width / 2, -img.height / 2);
-            ctx.restore();
-        }
-    </script>
-</body>
-</html>
+            ctx.rotate(rotation * Math.PI / 180
