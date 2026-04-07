@@ -3,73 +3,106 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Camera View</title>
+    <title>Painting Preview</title>
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            overflow: hidden;
-        }
-        #camera {
-            width: 100%;
-            height: 100%;
-            position: absolute;
-        }
-        #controlBar {
-            width: 100%;
-            position: absolute;
-            bottom: 0;
-            background: #333;
-            color: white;
-            transition: max-height 0.3s ease;
-            max-height: 50px;
-            overflow: hidden;
-        }
-        .section {
-            display: none;
-            padding: 10px;
-        }
-        .section.expanded {
-            display: block;
-        }
-        .header {
-            cursor: pointer;
-            padding: 10px;
-            background: #444;
-        }
+        body { margin: 0; }
+        #canvas { border: 1px solid black; display: block; margin: 20px auto; }
+        .controls { display: flex; flex-direction: column; align-items: center; }
+        .collapsible { cursor: pointer; padding: 10px; border: none; background-color: #f1f1f1; }
+        .content { display: none; padding: 0 18px; }
     </style>
 </head>
 <body>
-    <video id="camera" autoplay></video>
-    <div id="controlBar">
-        <div class="header" onclick="toggleSection('section1')">Section 1</div>
-        <div id="section1" class="section">
-            <p>Content for section 1...</p>
-        </div>
-        <div class="header" onclick="toggleSection('section2')">Section 2</div>
-        <div id="section2" class="section">
-            <p>Content for section 2...</p>
-        </div>
+    <canvas id="canvas" width="800" height="600"></canvas>
+    <input type="file" id="imageUpload" accept="image/*" />
+    <div class="controls">
+        <button id="rotateLeft">Rotate Left</button>
+        <button id="rotateRight">Rotate Right</button>
+        <button id="resetRotation">Reset Rotation</button>
+        <label for="scaleSlider">Scale: </label>
+        <input type="range" id="scaleSlider" min="50" max="300" value="100" />%
+        <label for="opacitySlider">Opacity: </label>
+        <input type="range" id="opacitySlider" min="0" max="100" value="100" />%
+    </div>
+    <button class="collapsible">Control Bar</button>
+    <div class="content">
+        <h4>Drag to Position Image</h4>
+        <p>Title: <input type="text" id="imageTitle" /></p>
+        <p>Position X: <input type="number" id="posX" value="0" /></p>
+        <p>Position Y: <input type="number" id="posY" value="0" /></p>
+        <button id="setPosition">Set Position</button>
     </div>
     <script>
-        const video = document.getElementById('camera');
-        navigator.mediaDevices.getUserMedia({ video: true })
-            .then(stream => {
-                video.srcObject = stream;
-            });
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let img = new Image();
+        let rotation = 0;
+        let scale = 1;
+        let opacity = 1;
+        let dragging = false;
+        let dragStartX, dragStartY;
+        let posX = 0, posY = 0;
 
-        function toggleSection(sectionId) {
-            const section = document.getElementById(sectionId);
-            section.classList.toggle('expanded');
-            if (section.classList.contains('expanded')) {
-                section.style.display = 'block';
-                document.getElementById('controlBar').style.maxHeight = '200px';
+        document.getElementById('imageUpload').addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                img.src = event.target.result;
+                img.onload = draw;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        document.getElementById('rotateLeft').addEventListener('click', function () {
+            rotation -= 90;
+            draw();
+        });
+
+        document.getElementById('rotateRight').addEventListener('click', function () {
+            rotation += 90;
+            draw();
+        });
+
+        document.getElementById('resetRotation').addEventListener('click', function () {
+            rotation = 0;
+            draw();
+        });
+
+        document.getElementById('scaleSlider').addEventListener('input', function (e) {
+            scale = e.target.value / 100;
+            draw();
+        });
+
+        document.getElementById('opacitySlider').addEventListener('input', function (e) {
+            opacity = e.target.value / 100;
+            draw();
+        });
+
+        document.querySelector('.collapsible').addEventListener('click', function() {
+            const content = this.nextElementSibling;
+            if (content.style.display === "block") {
+                content.style.display = "none";
             } else {
-                section.style.display = 'none';
-                document.getElementById('controlBar').style.maxHeight = '50px';
+                content.style.display = "block";
             }
+        });
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(rotation * Math.PI / 180);
+            ctx.scale(scale, scale);
+            ctx.globalAlpha = opacity;
+            ctx.drawImage(img, -img.width / 2 + posX, -img.height / 2 + posY);
+            ctx.restore();
         }
+
+        document.getElementById('setPosition').addEventListener('click', function () {
+            posX = parseInt(document.getElementById('posX').value);
+            posY = parseInt(document.getElementById('posY').value);
+            draw();
+        });
     </script>
 </body>
 </html>
